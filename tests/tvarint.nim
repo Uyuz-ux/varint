@@ -18,27 +18,27 @@ proc next(xs: var Xorshift): uint64 =
   xs.state = x
   result = x
 
-func toU8(vals: varargs[int]): seq[uint8] =
+func u8seq(vals: varargs[int]): seq[uint8] =
   for v in vals:
     result.add(v.uint8)
 
 suite "known vectors (protobuf/LEB128 reference)":
   test "single byte values":
-    check encodeVarint(0'u64) == toU8(0x00)
-    check encodeVarint(1'u64) == toU8(0x01)
-    check encodeVarint(127'u64) == toU8(0x7F)
+    check encodeVarint(0'u64) == u8seq(0x00)
+    check encodeVarint(1'u64) == u8seq(0x01)
+    check encodeVarint(127'u64) == u8seq(0x7F)
   test "two and three byte values":
-    check encodeVarint(128'u64) == toU8(0x80, 0x01)
-    check encodeVarint(150'u64) == toU8(0x96, 0x01)
-    check encodeVarint(300'u64) == toU8(0xAC, 0x02)
-    check encodeVarint(16384'u64) == toU8(0x80, 0x80, 0x01)
+    check encodeVarint(128'u64) == u8seq(0x80, 0x01)
+    check encodeVarint(150'u64) == u8seq(0x96, 0x01)
+    check encodeVarint(300'u64) == u8seq(0xAC, 0x02)
+    check encodeVarint(16384'u64) == u8seq(0x80, 0x80, 0x01)
   test "boundary widths":
-    check encodeVarint((1'u64 shl 31) - 1'u64) == toU8(0xFF, 0xFF, 0xFF, 0xFF, 0x07)
-    check encodeVarint(1'u64 shl 32) == toU8(0x80, 0x80, 0x80, 0x80, 0x10)
+    check encodeVarint((1'u64 shl 31) - 1'u64) == u8seq(0xFF, 0xFF, 0xFF, 0xFF, 0x07)
+    check encodeVarint(1'u64 shl 32) == u8seq(0x80, 0x80, 0x80, 0x80, 0x10)
     check encodeVarint((1'u64 shl 63) - 1'u64) ==
-      toU8(0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x7F)
+      u8seq(0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x7F)
     check encodeVarint(uint64.high) ==
-      toU8(0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01)
+      u8seq(0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01)
   test "every encoded value decodes back":
     let values = [0'u64, 1'u64, 127'u64, 128'u64, 150'u64, 300'u64, 16384'u64,
       (1'u64 shl 31) - 1'u64, 1'u64 shl 32, (1'u64 shl 63) - 1'u64, uint64.high]
@@ -82,9 +82,9 @@ suite "zigzag":
       let v = cast[int64](xs.next())
       check zigzagDecode(zigzagEncode(v)) == v
   test "signed one-call helpers":
-    check encodeSVarint(-1'i64) == toU8(0x01)
-    check encodeSVarint(0'i64) == toU8(0x00)
-    check encodeSVarint(1'i64) == toU8(0x02)
+    check encodeSVarint(-1'i64) == u8seq(0x01)
+    check encodeSVarint(0'i64) == u8seq(0x00)
+    check encodeSVarint(1'i64) == u8seq(0x02)
     check encodeSVarint(int64.low).len == 10
     for v in [0'i64, -1'i64, 1'i64, 127'i64, -128'i64, int64.high, int64.low]:
       var pos = 0
@@ -130,9 +130,9 @@ suite "error handling":
       discard decodeVarint(bad, pos)
     check not decodeVarintSafe(bad, 0).ok
   test "non-canonical encodings accepted (protobuf interop)":
-    check decodeVarintSafe(toU8(0x80, 0x00), 0).value == 0'u64
-    check decodeVarintSafe(toU8(0x81, 0x00), 0).value == 1'u64
-    check decodeVarintSafe(toU8(0x80, 0x80, 0x00), 0).value == 0'u64
+    check decodeVarintSafe(u8seq(0x80, 0x00), 0).value == 0'u64
+    check decodeVarintSafe(u8seq(0x81, 0x00), 0).value == 1'u64
+    check decodeVarintSafe(u8seq(0x80, 0x80, 0x00), 0).value == 0'u64
 
 suite "cursors and streams":
   test "sequential values share one buffer with correct offsets":
