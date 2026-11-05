@@ -1,0 +1,5 @@
+tests/tvarint
+examples/basic
+examples/streamio
+nimcache/
+*.exe

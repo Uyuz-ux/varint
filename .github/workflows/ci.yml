@@ -1,0 +1,23 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        # Exact versions: 'x.y.x' patterns query the GitHub tags API which
+        # gets rate-limited on runners; exact versions download directly.
+        nim: ['1.6.20', '2.0.8', '2.2.4', 'stable']
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jiro4989/setup-nim-action@v2
+        with:
+          nim-version: ${{ matrix.nim }}
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - run: nimble test -y
