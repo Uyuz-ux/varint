@@ -197,3 +197,99 @@ suite "varintLen":
     check decodeVarint(buf, pos) == 150'u64
     check decodeSVarint(buf, pos) == -7'i64
     check pos == buf.len
+
+suite "pack and values (batch API)":
+  test "pack + values round-trip on mixed magnitudes":
+    let vals = [0'u64, 1'u64, 127'u64, 128'u64, 300'u64, 1'u64 shl 32,
+      (1'u64 shl 63) - 1'u64, uint64.high]
+    let buf = pack(vals)
+    var expected: seq[uint8]
+    for v in vals:
+      encodeVarint(v, expected)
+    check buf == expected
+    var got: seq[uint64]
+    for v in values(buf):
+      got.add(v)
+    check got == @vals
+  test "values over a string buffer":
+    var s = ""
+    for b in pack([7'u64, 2048'u64, 0'u64, uint64.high]):
+      s.add(b.char)
+    var got: seq[uint64]
+    for v in values(s):
+      got.add(v)
+    check got == @[7'u64, 2048'u64, 0'u64, uint64.high]
+  test "packSigned + svalues round-trip with negatives":
+    let vals = [0'i64, -1'i64, 1'i64, -128'i64, 300'i64, int64.low, int64.high]
+    let buf = packSigned(vals)
+    var expected: seq[uint8]
+    for v in vals:
+      encodeSVarint(v, expected)
+    check buf == expected
+    var got: seq[int64]
+    for v in svalues(buf):
+      got.add(v)
+    check got == @vals
+  test "empty input yields nothing":
+    let empty: seq[uint64] = @[]
+    check pack(empty).len == 0
+    let emptyBuf: seq[uint8] = @[]
+    var n = 0
+    for _ in values(emptyBuf):
+      inc n
+    check n == 0
+    let emptySigned: seq[int64] = @[]
+    check packSigned(emptySigned).len == 0
+    for _ in svalues(emptyBuf):
+      inc n
+    check n == 0
+  test "truncated tail raises VarintError":
+    let buf = pack([150'u64])   # 0x96 0x01
+    let cut = buf[0 ..< 1]      # continuation bit promises a second byte
+    expect VarintError:
+      for _ in values(cut):
+        discard
+    var s = ""
+    s.add(0x96'u8.char)
+    expect VarintError:
+      for _ in values(s):
+        discard
+  test "stream iteration stops at end of stream":
+    let ss = newStringStream()
+    writeVarint(ss, 5'u64)
+    writeVarint(ss, 123456789'u64)
+    ss.setPosition(0)
+    var got: seq[uint64]
+    for v in values(ss):
+      got.add(v)
+    check got == @[5'u64, 123456789'u64]
+    check ss.atEnd()
+    ss.close()
+  test "signed stream iteration reads every varint":
+    let ss = newStringStream()
+    writeSVarint(ss, -1'i64)
+    writeSVarint(ss, 98765'i64)
+    ss.setPosition(0)
+    var got: seq[int64]
+    for v in svalues(ss):
+      got.add(v)
+    check got == @[-1'i64, 98765'i64]
+    check ss.atEnd()
+    ss.close()
+  test "stream truncation mid-encoding raises":
+    let ss = newStringStream("\x96")
+    expect VarintError:
+      for _ in values(ss):
+        discard
+    ss.close()
+  test "deterministic random batch round-trip":
+    var xs = Xorshift(state: 0xDEADBEEFCAFEBABE'u64)
+    var vals: seq[uint64]
+    for _ in 0 ..< 2000:
+      vals.add(xs.next())
+    let buf = pack(vals)
+    var n = 0
+    for v in values(buf):
+      check v == vals[n]
+      inc n
+    check n == vals.len

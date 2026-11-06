@@ -36,6 +36,10 @@ and strictly specified:
 - **Signed integers stay small.** `encodeSVarint(-1)` is a single `0x01`
   byte, not a 10-byte sign-extended unsigned encoding, via the standard
   ZigZag mapping (`zigzagEncode` / `zigzagDecode`).
+- **Batch layout without length prefixes.** `pack` concatenates a whole
+  sequence of values into one buffer and the `values` iterator reads them
+  back — the layout of protobuf packed repeated fields, DWARF ULEB128
+  sequences and SQLite header varints.
 - **Pure computation.** The sequence/string APIs are side-effect free and
   safe to call from multiple threads.
 
@@ -69,6 +73,15 @@ proc writeVarint*(s: Stream; value: uint64)
 proc readVarint*(s: Stream): uint64
 proc writeSVarint*(s: Stream; value: int64)
 proc readSVarint*(s: Stream): int64
+
+proc pack*(values: openArray[uint64]): seq[uint8]        # batch encode
+proc packSigned*(values: openArray[int64]): seq[uint8]   # ZigZag batch
+iterator values*(buf: openArray[uint8]): uint64          # batch decode
+iterator values*(buf: string): uint64
+iterator values*(s: Stream): uint64                      # until EOF
+iterator svalues*(buf: openArray[uint8]): int64          # ZigZag batch
+iterator svalues*(buf: string): int64
+iterator svalues*(s: Stream): int64
 ```
 
 `pos` is an in-out cursor: after a successful `decodeVarint`, it points
@@ -89,6 +102,11 @@ var pos = 0
 assert decodeVarint(buf, pos) == 300
 assert decodeSVarint(buf, pos) == -7
 assert pos == buf.len
+
+# Batch layout: many values, no length prefix needed
+let batch = pack([5'u64, 1'u64 shl 40, uint64.high])
+for v in values(batch):
+  echo v                                  # 5, 1099511627776, 18446744073709551615
 ```
 
 More in [`examples/`](examples/): `basic.nim` covers cursors and byte
@@ -96,12 +114,13 @@ costs; `streamio.nim` covers file streams and error handling.
 
 ## Tests
 
-21 tests cover the protobuf reference byte vectors, exhaustive
+30 tests cover the protobuf reference byte vectors, exhaustive
 small-value and power-of-two round-trips, 10,000 deterministic random
-round-trips (unsigned + ZigZag), truncation, overlong encodings,
-non-canonical acceptance, cursor arithmetic and the stream API. The suite
-passes on default, `-d:release`, `-d:danger` and `--mm:orc` builds, and
-CI checks Nim 1.6.20, 2.0.8, 2.2.4 and stable.
+round-trips (unsigned + ZigZag), batch `pack`/`values` round-trips
+(including 2,000 random values in one buffer), truncation, overlong
+encodings, non-canonical acceptance, cursor arithmetic and the stream
+API. The suite passes on default, `-d:release`, `-d:danger` and
+`--mm:orc` builds, and CI checks Nim 1.6.20, 2.0.8, 2.2.4 and stable.
 
 ```sh
 nimble test

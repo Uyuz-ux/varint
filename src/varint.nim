@@ -14,6 +14,10 @@
 ##   (`zigzagEncode`, `zigzagDecode`) plus signed one-call helpers
 ##   (`encodeSVarint`, `decodeSVarint`, `writeSVarint`, `readSVarint`)
 ## * a `varintLen` helper for length-prefix layouts without encoding twice
+## * batch helpers: `pack` / `packSigned` concatenate whole sequences of
+##   values into one buffer, and the `values` / `svalues` iterators read
+##   them back (the layout of protobuf packed repeated fields, DWARF
+##   ULEB128 sequences and SQLite header varints)
 ##
 ## Semantics notes:
 ## * Decoding accepts non-canonical (over-padded) encodings such as
@@ -230,3 +234,63 @@ proc writeSVarint*(s: Stream; value: int64) =
 proc readSVarint*(s: Stream): int64 =
   ## Read a ZigZag+varint encoded signed integer from `s`.
   zigzagDecode(readVarint(s))
+
+proc pack*(values: openArray[uint64]): seq[uint8] =
+  ## Concatenate the varint encodings of all `values` into a single
+  ## buffer. Read it back with the `values` iterator.
+  var cap = 0
+  for v in values:
+    cap += varintLen(v)
+  result = newSeqOfCap[uint8](cap)
+  for v in values:
+    encodeVarint(v, result)
+
+proc packSigned*(values: openArray[int64]): seq[uint8] =
+  ## ZigZag variant of `pack`: encodes each signed value with
+  ## `encodeSVarint`. Read it back with the `svalues` iterator.
+  var cap = 0
+  for v in values:
+    cap += varintLen(zigzagEncode(v))
+  result = newSeqOfCap[uint8](cap)
+  for v in values:
+    encodeSVarint(v, result)
+
+iterator values*(buf: openArray[uint8]): uint64 =
+  ## Iterates over the successive varints in `buf` (as produced by
+  ## `pack` or any other concatenation of varint encodings). Raises
+  ## `VarintError` when the buffer ends mid-encoding or contains an
+  ## over-long or overflowing encoding; non-canonical encodings are
+  ## accepted, matching `decodeVarint`.
+  var pos = 0
+  while pos < buf.len:
+    yield decodeVarint(buf, pos)
+
+iterator values*(buf: string): uint64 =
+  ## String overload of `values` (wire buffers often live in strings).
+  var pos = 0
+  while pos < buf.len:
+    yield decodeVarint(buf, pos)
+
+iterator svalues*(buf: openArray[uint8]): int64 =
+  ## Signed (ZigZag) counterpart of `values`; pairs with `packSigned`.
+  var pos = 0
+  while pos < buf.len:
+    yield decodeSVarint(buf, pos)
+
+iterator svalues*(buf: string): int64 =
+  ## String overload of `svalues`.
+  var pos = 0
+  while pos < buf.len:
+    yield decodeSVarint(buf, pos)
+
+iterator values*(s: Stream): uint64 =
+  ## Iterates over successive varints read from `s` until end of
+  ## stream. Raises `VarintError` if the stream ends mid-encoding
+  ## (see `readVarint`).
+  while not s.atEnd():
+    yield readVarint(s)
+
+iterator svalues*(s: Stream): int64 =
+  ## Signed (ZigZag) counterpart of the stream `values` iterator.
+  while not s.atEnd():
+    yield readSVarint(s)
