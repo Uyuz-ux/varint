@@ -59,6 +59,8 @@ proc decodeVarint*(input: openArray[uint8]; pos: var int): uint64
 proc decodeVarint*(input: string; pos: var int): uint64   # wire buffers
 proc decodeVarintSafe*(input: openArray[uint8]; startPos = 0):
   tuple[value: uint64, nextPos: int, ok: bool]            # non-raising
+proc skipVarint*(input: openArray[uint8]; pos: var int)   # skip unknown fields
+proc skipVarint*(input: string; pos: var int)
 
 proc zigzagEncode*(v: int64): uint64
 proc zigzagDecode*(u: uint64): int64
@@ -87,7 +89,10 @@ iterator svalues*(s: Stream): int64
 `pos` is an in-out cursor: after a successful `decodeVarint`, it points
 just past the consumed bytes, so consecutive values can be read from one
 buffer without slicing. `decodeVarintSafe` returns the offset where
-decoding stopped even on failure.
+decoding stopped even on failure. `skipVarint` advances the same cursor
+past one encoding without building the value — validating exactly like
+`decodeVarint` and landing on the same position — which is what protobuf
+wire parsers do when skipping unknown fields.
 
 ## Example
 
@@ -114,13 +119,15 @@ costs; `streamio.nim` covers file streams and error handling.
 
 ## Tests
 
-30 tests cover the protobuf reference byte vectors, exhaustive
+38 tests cover the protobuf reference byte vectors, exhaustive
 small-value and power-of-two round-trips, 10,000 deterministic random
 round-trips (unsigned + ZigZag), batch `pack`/`values` round-trips
 (including 2,000 random values in one buffer), truncation, overlong
-encodings, non-canonical acceptance, cursor arithmetic and the stream
-API. The suite passes on default, `-d:release`, `-d:danger` and
-`--mm:orc` builds, and CI checks Nim 1.6.20, 2.0.8, 2.2.4 and stable.
+encodings, non-canonical acceptance, cursor arithmetic, `skipVarint`
+cursor agreement with `decodeVarint` (boundary values, packed buffers,
+malformed input) and the stream API. The suite passes on default,
+`-d:release`, `-d:danger` and `--mm:orc` builds, and CI checks Nim
+1.6.20, 2.0.8, 2.2.4 and stable.
 
 ```sh
 nimble test

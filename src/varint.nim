@@ -18,6 +18,10 @@
 ##   values into one buffer, and the `values` / `svalues` iterators read
 ##   them back (the layout of protobuf packed repeated fields, DWARF
 ##   ULEB128 sequences and SQLite header varints)
+## * `skipVarint` advances a cursor past one encoding without decoding
+##   its value (protobuf unknown-field skipping, DWARF attribute
+##   walking); it validates exactly like `decodeVarint` and lands on
+##   the same position
 ##
 ## Semantics notes:
 ## * Decoding accepts non-canonical (over-padded) encodings such as
@@ -146,6 +150,41 @@ proc decodeVarintSafe*(input: openArray[uint8]; startPos = 0):
     (value: v, nextPos: p, ok: true)
   else:
     (value: 0'u64, nextPos: p, ok: false)
+
+proc skipVarint*(input: openArray[uint8]; pos: var int) =
+  ## Advance `pos` past one varint in `input` without decoding the
+  ## value. Validation and error behavior are identical to
+  ## `decodeVarint`: truncated input, encodings longer than
+  ## `maxVarintLen` bytes, and values beyond 64 bits all raise
+  ## `VarintError`, and non-canonical over-padded encodings are
+  ## accepted. After a successful skip, `pos` is exactly where
+  ## `decodeVarint` would have left it — useful for skipping unknown
+  ## fields (protobuf wire parsing) or unwanted attributes (DWARF)
+  ## without materializing the value.
+  var v: uint64
+  let st = decodeCore(input, pos, v)
+  if st != veNone:
+    let why =
+      case st
+      of veTruncated: "truncated varint (stream ended mid-encoding) at byte " & $pos
+      of veTooLong: "varint longer than " & $maxVarintLen & " bytes at byte " & $pos
+      of veOverflow: "varint value overflows 64 bits at byte " & $pos
+      of veNone: ""
+    raise newException(VarintError, why)
+
+proc skipVarint*(input: string; pos: var int) =
+  ## String overload of `skipVarint` (wire buffers often live in
+  ## strings). Same semantics as the byte sequence variant.
+  var v: uint64
+  let st = decodeCore(input.toOpenArrayByte(0, input.high), pos, v)
+  if st != veNone:
+    let why =
+      case st
+      of veTruncated: "truncated varint (stream ended mid-encoding) at byte " & $pos
+      of veTooLong: "varint longer than " & $maxVarintLen & " bytes at byte " & $pos
+      of veOverflow: "varint value overflows 64 bits at byte " & $pos
+      of veNone: ""
+    raise newException(VarintError, why)
 
 proc zigzagEncode*(v: int64): uint64 {.inline.} =
   ## Map a signed 64-bit integer to an unsigned one so that

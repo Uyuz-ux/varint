@@ -293,3 +293,80 @@ suite "pack and values (batch API)":
       check v == vals[n]
       inc n
     check n == vals.len
+
+suite "skipVarint":
+  test "skip lands on the same pos as decode for boundary values":
+    const bounds = [0'u64, 1, 127, 128, 300, 16383, 16384, 65535,
+                    1'u64 shl 21, 1'u64 shl 28, 1'u64 shl 35,
+                    1'u64 shl 42, 1'u64 shl 49, 1'u64 shl 56,
+                    1'u64 shl 63, uint64.high]
+    for v in bounds:
+      let buf = encodeVarint(v)
+      var pSkip = 0
+      skipVarint(buf, pSkip)
+      var pDec = 0
+      discard decodeVarint(buf, pDec)
+      check pSkip == pDec
+      check pSkip == buf.len
+
+  test "skipping a packed buffer consumes it exactly":
+    let buf = pack([0'u64, 1, 127, 128, 300, uint64.high])
+    var pos = 0
+    var count = 0
+    while pos < buf.len:
+      skipVarint(buf, pos)
+      inc count
+    check count == 6
+    check pos == buf.len
+
+  test "skip accepts over-padded encodings like decode":
+    let buf = @[0x80'u8, 0x00]
+    var pos = 0
+    skipVarint(buf, pos)
+    check pos == 2
+
+  test "truncated input raises VarintError":
+    let buf = @[0x80'u8]
+    var pos = 0
+    expect VarintError:
+      skipVarint(buf, pos)
+
+  test "encodings longer than maxVarintLen raise":
+    var buf: seq[uint8]
+    for i in 1 .. 11:
+      buf.add(0x80'u8)
+    var pos = 0
+    expect VarintError:
+      skipVarint(buf, pos)
+
+  test "10th byte payload beyond bit 63 raises":
+    var buf: seq[uint8]
+    for i in 1 .. 9:
+      buf.add(0x80'u8)
+    buf.add(0x02'u8)
+    var pos = 0
+    expect VarintError:
+      skipVarint(buf, pos)
+
+  test "string overload matches sequence semantics":
+    let batch = pack([7'u64, 999'u64])
+    var s = newString(batch.len)
+    for i, b in batch:
+      s[i] = char(b)
+    var pos = 0
+    skipVarint(s, pos)
+    check pos == varintLen(7'u64)
+    skipVarint(s, pos)
+    check pos == s.len
+
+  test "skip interleaves with decode without cursor drift":
+    let buf = packSigned([-3'i64, 0, 1, -2147483648, 2147483647])
+    var pSkip = 0
+    var pDec = 0
+    var steps = 0
+    while pSkip < buf.len:
+      skipVarint(buf, pSkip)
+      discard decodeSVarint(buf, pDec)
+      check pSkip == pDec
+      inc steps
+    check steps == 5
